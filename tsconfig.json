@@ -1,0 +1,16 @@
+{
+"compilerOptions": {
+    // versione fissa e sicura, supportata nativamente da tutte le versioni moderne di Node.js
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    //codice oggetto in ./dist
+    "outDir": "./dist",
+    //codice scritto a mano si trova nella cartella src
+    "rootDir": "./src",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true
+  },
+  "include": ["src/**/*"]
+}
