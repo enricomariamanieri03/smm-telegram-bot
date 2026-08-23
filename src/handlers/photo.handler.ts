@@ -1,5 +1,6 @@
 import { Context, InlineKeyboard } from 'grammy';
 import { generateSocialPost } from '../services/openai.service.js';
+import { savePendingPost } from '../services/pending-post.service.js';
 import { Destination } from '../types/destination.enum.js';
 import { AlbumBuffer } from '../types/album-buffer.interface.js';
 
@@ -8,37 +9,57 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // Helper per formattare la destinazione nell'anteprima
 function getDestinationLabel(destinazione: string): string {
-  if (destinazione === Destination.FB) {
-    return 'Facebook';
+    if (destinazione === Destination.FB) {
+        return 'Facebook';
+    }
+    if (destinazione === Destination.IG) {
+        return 'Instagram';
+    }
+    return 'Instagram & Facebook';
+}
+
+/**
+ * Alla scadenza conserva l'anteprima come riferimento, ma rimuove le azioni non piu valide
+ * e informa l'utente con un nuovo messaggio nella stessa chat.
+ */
+async function expirePreview(ctx: Context, chatId: number, previewMessageId: number): Promise<void> {
+  try {
+    await ctx.api.editMessageReplyMarkup(chatId, previewMessageId, {
+      reply_markup: { inline_keyboard: [] },
+    });
+  } catch (error) {
+    console.error(`Errore durante la rimozione della tastiera dell'anteprima scaduta:`, error);
   }
-  if (destinazione === Destination.IG) {
-    return 'Instagram';
+
+  try {
+    await ctx.api.sendMessage(chatId, '⏱️ Sessione scaduta. Riprova con nuove foto.');
+  } catch (error) {
+    console.error(`Errore durante l'invio della notifica di sessione scaduta:`, error);
   }
-  return 'Instagram & Facebook';
 }
 
 async function getPhotoDataUrl(filePath: string): Promise<string> {
-  const botToken = process.env.TELEGRAM_BOT_TOKEN;
-  if (!botToken) {
-    throw new Error('TELEGRAM_BOT_TOKEN non esiste.');
-  }
+    const botToken = process.env.TELEGRAM_BOT_TOKEN;
+    if (!botToken) {
+        throw new Error('TELEGRAM_BOT_TOKEN non esiste.');
+    }
 
-  const photoUrl = `https://api.telegram.org/file/bot${botToken}/${filePath}`;
-  const photoResponse = await fetch(photoUrl);
+    const photoUrl = `https://api.telegram.org/file/bot${botToken}/${filePath}`;
+    const photoResponse = await fetch(photoUrl);
 
-  if (!photoResponse.ok) {
-    throw new Error(`Impossibile scaricare la foto da Telegram (HTTP ${photoResponse.status}).`);
-  }
+    if (!photoResponse.ok) {
+        throw new Error(`Impossibile scaricare la foto da Telegram (HTTP ${photoResponse.status}).`);
+    }
 
-  let contentType = photoResponse.headers.get('content-type')?.split(';')[0] || 'image/jpeg';
-  // Telegram restituisce spesso 'application/octet-stream'.
-  // Se l'header non inizia con 'image/', forziamo un MIME type valido per OpenAI Vision.
-  if (!contentType || !contentType.startsWith('image/')) {
-    contentType = filePath.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
-  }
-  const photoBase64 = Buffer.from(await photoResponse.arrayBuffer()).toString('base64');
+    let contentType = photoResponse.headers.get('content-type')?.split(';')[0] || 'image/jpeg';
+    // Telegram restituisce spesso 'application/octet-stream'.
+    // Se l'header non inizia con 'image/', forziamo un MIME type valido per OpenAI Vision.
+    if (!contentType || !contentType.startsWith('image/')) {
+        contentType = filePath.toLowerCase().endsWith('.png') ? 'image/png' : 'image/jpeg';
+    }
+    const photoBase64 = Buffer.from(await photoResponse.arrayBuffer()).toString('base64');
 
-  return `data:${contentType};base64,${photoBase64}`;
+    return `data:${contentType};base64,${photoBase64}`;
 }
 
 /**
@@ -84,44 +105,44 @@ export async function handlePhotoMessage(ctx: Context): Promise<void> {
         clearTimeout(existingBuffer.timer);
         existingBuffer.fileIds.push(highestPhoto.file_id);
 
-    // Mantiene la didascalia se presente su una delle foto dell'album
-    if (ctx.message?.caption?.trim()) {
-      existingBuffer.caption = ctx.message.caption.trim();
+        // Mantiene la didascalia se presente su una delle foto dell'album
+        if (ctx.message?.caption?.trim()) {
+            existingBuffer.caption = ctx.message.caption.trim();
+        }
+
+        existingBuffer.timer = setTimeout(() => {
+        const buffer = albumBuffers.get(mediaGroupId);
+        if (buffer) {
+            albumBuffers.delete(mediaGroupId);
+            processPhotos(buffer.ctx, buffer.fileIds, buffer.caption);
+        }
+        }, 800);
+    } else {
+       /**
+        * GESTIONE CAROSELLO - PRIMA FOTO (Inizializzazione Buffer, nuovo mediaGroupId):
+        * Registra il primo file dell'album nel buffer in memoria.
+        * 
+        * @asynchronous_behavior 
+        * setTimeout alloca la callback nell'Event Loop senza sospendere la funzione.
+        * L'istruzione albumBuffers.set() viene eseguita immediatamente dopo (0ms),
+        * garantendo che quando la callback scatterà dopo 800ms, la Map conterrà già
+        * l'oggetto AlbumBuffer corretto.
+        */
+        const timer = setTimeout(() => {
+        const buffer = albumBuffers.get(mediaGroupId);
+        if (buffer) {
+            albumBuffers.delete(mediaGroupId);
+            processPhotos(buffer.ctx, buffer.fileIds, buffer.caption);
+        }
+        }, 800);
+
+        albumBuffers.set(mediaGroupId, {
+        timer,
+        fileIds: [highestPhoto.file_id],
+        caption: ctx.message?.caption?.trim() || '',
+        ctx,
+        });
     }
-
-    existingBuffer.timer = setTimeout(() => {
-      const buffer = albumBuffers.get(mediaGroupId);
-      if (buffer) {
-        albumBuffers.delete(mediaGroupId);
-        processPhotos(buffer.ctx, buffer.fileIds, buffer.caption);
-      }
-    }, 800);
-  } else {
-    /**
-    * GESTIONE CAROSELLO - PRIMA FOTO (Inizializzazione Buffer, nuovo mediaGroupId):
-    * Registra il primo file dell'album nel buffer in memoria.
-    * 
-    * @asynchronous_behavior 
-    * setTimeout alloca la callback nell'Event Loop senza sospendere la funzione.
-    * L'istruzione albumBuffers.set() viene eseguita immediatamente dopo (0ms),
-    * garantendo che quando la callback scatterà dopo 800ms, la Map conterrà già
-    * l'oggetto AlbumBuffer corretto.
-    */
-    const timer = setTimeout(() => {
-      const buffer = albumBuffers.get(mediaGroupId);
-      if (buffer) {
-        albumBuffers.delete(mediaGroupId);
-        processPhotos(buffer.ctx, buffer.fileIds, buffer.caption);
-      }
-    }, 800);
-
-    albumBuffers.set(mediaGroupId, {
-      timer,
-      fileIds: [highestPhoto.file_id],
-      caption: ctx.message?.caption?.trim() || '',
-      ctx,
-    });
-  }
 }
 
 // Funzione principale di elaborazione (gestisce 1 o N immagini)
@@ -162,7 +183,7 @@ async function processPhotos(ctx: Context, fileIds: string[], caption: string): 
     const locationText = socialPost.luogo ? `\n📍 ${socialPost.luogo}` : '';
 
     // Anteprima del Post
-    await ctx.reply(
+    const previewMessage = await ctx.reply(
       `<b>📝 ANTEPRIMA DEL TUO POST</b>\n` +
       `<i>📱 Destinazione: ${destinationLabel}</i>${locationText}\n\n` +
       `<blockquote>${socialPost.testo_pulito}</blockquote>\n\n` +
@@ -173,7 +194,16 @@ async function processPhotos(ctx: Context, fileIds: string[], caption: string): 
       }
     );
 
-    // Pausa di 3 secondi
+    // Salviamo tutte le anteprime in stato di attesa di Approva/Modifica/Rifiuta
+    savePendingPost(String(postId), {
+      caption: socialPost.testo_pulito,
+      chatId: previewMessage.chat.id,
+      destination: socialPost.destinazione,
+      fileIds,
+      previewMessageId: previewMessage.message_id,
+    }, (expiredPost) => expirePreview(ctx, expiredPost.chatId, expiredPost.previewMessageId));
+
+    // Pausa di 5 secondi
     await sleep(5000);
 
     // Eliminazione del messaggio di attesa

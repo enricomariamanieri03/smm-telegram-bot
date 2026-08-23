@@ -1,6 +1,11 @@
 import { Bot, Context, NextFunction } from 'grammy';
 import dotenv from 'dotenv';
-import { handleRejectCallback, handleStartAndHelpCommand, handlePhotoMessage } from './handlers/index.js';
+import {
+  handleApproveCallback,
+  handleRejectCallback,
+  handleStartAndHelpCommand,
+  handlePhotoMessage,
+} from './handlers/index.js';
 
 // Caricamento variabili dall'env e inserimento nell'oggetto globale process
 dotenv.config();
@@ -47,6 +52,8 @@ bot.command(['start', 'help'], handleStartAndHelpCommand);
 bot.on('message:photo', handlePhotoMessage);
 // Gestione regex del pulsante "Rifiuta" con callback data nel formato rifiuta_<postId>
 bot.callbackQuery(/^rifiuta_\d+$/, handleRejectCallback);
+// Gestione del pulsante "Approva e Pubblica" per le anteprime destinate a Facebook.
+bot.callbackQuery(/^approva_\d+$/, handleApproveCallback);
 
 // Avvio applicazione
 async function startApplication() {
