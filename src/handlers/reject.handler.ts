@@ -1,20 +1,23 @@
 import { Context } from 'grammy';
+import { deletePendingPost, getPendingPost } from '../services/pending-post.service.js';
 
 export async function handleRejectCallback(ctx: Context): Promise<void> {
     try {
         // 1. Notifica a Telegram la ricezione del click (rimuove lo stato di caricamento dal pulsante)
         await ctx.answerCallbackQuery({ text: 'Post eliminato' });
 
-        const callbackMessage = ctx.callbackQuery?.message;
-        const chatId = callbackMessage?.chat.id;
-        const messageId = callbackMessage?.message_id;
+        const postId = ctx.callbackQuery?.data?.match(/^rifiuta_(\d+)$/)?.[1];
+        const pendingPost = postId ? getPendingPost(postId) : undefined;
 
-        if (chatId === undefined || messageId === undefined) {
-            throw new Error('La callback query non contiene un messaggio eliminabile.');
+        if (!postId || !pendingPost) {
+            throw new Error(`L’anteprima da rifiutare non é più disponibile.`);
         }
+        //Destrutturazione dell' oggetto prendendo i valori dei due corrispettivi campi
+        const { chatId, previewMessageId } = pendingPost;
+        deletePendingPost(postId);
 
         // 2. La cancellazione parte in background: non ritarda il messaggio di conferma.
-        void ctx.api.deleteMessage(chatId, messageId).catch((error) => {
+        void ctx.api.deleteMessage(chatId, previewMessageId).catch((error) => {
             console.error('Errore durante l’eliminazione dell’anteprima:', error);
         });
 
