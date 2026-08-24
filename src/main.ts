@@ -56,8 +56,9 @@ bot.command(['start', 'help'], handleStartAndHelpCommand);
 bot.on('message:photo', handlePhotoMessage);
 // Gestione regex del pulsante "Rifiuta" con callback data nel formato rifiuta_<postId>
 bot.callbackQuery(/^rifiuta_\d+$/, handleRejectCallback);
-// Gestione del pulsante "Approva e Pubblica" per le anteprime destinate a Facebook.
+// Gestione dei pulsanti "Approva e Pubblica" e "Riprova" delle anteprime.
 bot.callbackQuery(/^approva_\d+$/, handleApproveCallback);
+bot.callbackQuery(/^riprova_\d+$/, handleApproveCallback);
 
 // Avvio applicazione
 async function startApplication() {
