@@ -6,6 +6,7 @@ import {
   handleStartAndHelpCommand,
   handlePhotoMessage,
 } from './handlers/index.js';
+import { cloudinaryGarbageCollector } from './services/cloudinary-garbage-collector.service.js';
 
 // Caricamento variabili dall'env e inserimento nell'oggetto globale process
 dotenv.config();
@@ -30,6 +31,9 @@ function parseAllowedUsers(rawUsers: string | undefined): number[] {
 }
 
 const allowedUsers: number[] = parseAllowedUsers(process.env.ALLOWED_USERS);
+
+// Avvia la pulizia immediata e la pianificazione giornaliera degli asset Cloudinary temporanei.
+cloudinaryGarbageCollector.start();
 
 // Middleware d'autenticazione
 async function authenticateUser(ctx: Context, next: NextFunction): Promise<void> {

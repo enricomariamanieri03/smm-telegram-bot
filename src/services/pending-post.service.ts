@@ -8,6 +8,7 @@ export interface PendingPost {
   chatId: number;
   destination: Destination;
   fileIds: string[];
+  sourceMessageIds: number[];
   expiresAt: number;
   previewMessageId: number;
 }
@@ -58,7 +59,13 @@ export function savePendingPost(
   onExpire?: PendingPostExpirationHandler,
 ): void {
   const expiresAt = Date.now() + PENDING_POST_TTL_MS;
-  mapPendingPosts.set(postId, { ...post, fileIds: [...post.fileIds], expiresAt, onExpire });
+  mapPendingPosts.set(postId, {
+    ...post,
+    fileIds: [...post.fileIds],
+    sourceMessageIds: [...post.sourceMessageIds],
+    expiresAt,
+    onExpire,
+  });
 
   const expirationTimer = setTimeout(() => {
     expirePendingPost(postId, expiresAt);

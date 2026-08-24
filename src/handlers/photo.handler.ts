@@ -84,10 +84,16 @@ export async function handlePhotoMessage(ctx: Context): Promise<void> {
     // Recupera la variante a risoluzione più alta della foto corrente
     const highestPhoto = photos[photos.length - 1];
     const mediaGroupId = ctx.message?.media_group_id;
+   /*Recupera l'id della prima foto inviata dall'utente inserendola nel buffer
+    *Utile nella successiva elminazione del messaggio in caso di errore
+    */
+    const sourceMessageId = ctx.message?.message_id;
+
+    if (!sourceMessageId) return;
 
     // 1. Gestione Foto Singola
     if (!mediaGroupId) {
-        await processPhotos(ctx, [highestPhoto.file_id], ctx.message?.caption?.trim() || '');
+        await processPhotos(ctx, [highestPhoto.file_id], ctx.message?.caption?.trim() || '', [sourceMessageId]);
         return;
     }
 
@@ -104,6 +110,7 @@ export async function handlePhotoMessage(ctx: Context): Promise<void> {
     if (existingBuffer) {
         clearTimeout(existingBuffer.timer);
         existingBuffer.fileIds.push(highestPhoto.file_id);
+        existingBuffer.messageIds.push(sourceMessageId);
 
         // Mantiene la didascalia se presente su una delle foto dell'album
         if (ctx.message?.caption?.trim()) {
@@ -114,7 +121,7 @@ export async function handlePhotoMessage(ctx: Context): Promise<void> {
         const buffer = albumBuffers.get(mediaGroupId);
         if (buffer) {
             albumBuffers.delete(mediaGroupId);
-            processPhotos(buffer.ctx, buffer.fileIds, buffer.caption);
+            processPhotos(buffer.ctx, buffer.fileIds, buffer.caption, buffer.messageIds);
         }
         }, 800);
     } else {
@@ -132,13 +139,14 @@ export async function handlePhotoMessage(ctx: Context): Promise<void> {
         const buffer = albumBuffers.get(mediaGroupId);
         if (buffer) {
             albumBuffers.delete(mediaGroupId);
-            processPhotos(buffer.ctx, buffer.fileIds, buffer.caption);
+            processPhotos(buffer.ctx, buffer.fileIds, buffer.caption, buffer.messageIds);
         }
         }, 800);
 
         albumBuffers.set(mediaGroupId, {
         timer,
         fileIds: [highestPhoto.file_id],
+        messageIds: [sourceMessageId],
         caption: ctx.message?.caption?.trim() || '',
         ctx,
         });
@@ -146,7 +154,12 @@ export async function handlePhotoMessage(ctx: Context): Promise<void> {
 }
 
 // Funzione principale di elaborazione (gestisce 1 o N immagini)
-async function processPhotos(ctx: Context, fileIds: string[], caption: string): Promise<void> {
+async function processPhotos(
+  ctx: Context,
+  fileIds: string[],
+  caption: string,
+  sourceMessageIds: number[],
+): Promise<void> {
   let statusMessage: Awaited<ReturnType<typeof ctx.reply>> | null = null;
 
   try {
@@ -200,6 +213,7 @@ async function processPhotos(ctx: Context, fileIds: string[], caption: string): 
       chatId: previewMessage.chat.id,
       destination: socialPost.destinazione,
       fileIds,
+      sourceMessageIds,
       previewMessageId: previewMessage.message_id,
     }, (expiredPost) => expirePreview(ctx, expiredPost.chatId, expiredPost.previewMessageId));
 
