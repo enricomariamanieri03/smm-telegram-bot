@@ -2,6 +2,17 @@ import { Destination } from '../types/destination.enum.js';
 
 const PENDING_POST_TTL_MS = 60 * 60 * 1000;//1 ora
 
+export type PlatformPublicationStatus = 'PENDING' | 'PUBLISHED' | 'FAILED' | 'UNKNOWN';
+
+/** Stato temporaneo del tentativo ENTRAMBI; serve a ritentare una sola volta solo i canali falliti. */
+export interface CrossPlatformPublicationState {
+  facebook: PlatformPublicationStatus;
+  instagram: PlatformPublicationStatus;
+  retryCount: 0 | 1;
+  facebookStatusMessageId?: number;
+  instagramStatusMessageId?: number;
+}
+
 /** Dati minimi conservati tra la generazione dell'anteprima e il click di approvazione. */
 export interface PendingPost {
   caption: string;
@@ -9,6 +20,7 @@ export interface PendingPost {
   destination: Destination;
   fileIds: string[];
   sourceMessageIds: number[];
+  crossPlatformState?: CrossPlatformPublicationState;
   expiresAt: number;
   previewMessageId: number;
 }
@@ -63,6 +75,7 @@ export function savePendingPost(
     ...post,
     fileIds: [...post.fileIds],
     sourceMessageIds: [...post.sourceMessageIds],
+    crossPlatformState: post.crossPlatformState ? { ...post.crossPlatformState } : undefined,
     expiresAt,
     onExpire,
   });
@@ -93,4 +106,19 @@ export function getPendingPost(postId: string): PendingPost | undefined {
 /** Rimuove lo stato quando l'utente approva o rifiuta l'anteprima. */
 export function deletePendingPost(postId: string): void {
   mapPendingPosts.delete(postId);
+}
+
+/** Aggiorna in modo atomico lo stato della pubblicazione congiunta mantenendo la sessione esistente. */
+export function updateCrossPlatformState(
+  postId: string,
+  crossPlatformState: CrossPlatformPublicationState,
+): PendingPost | undefined {
+  const pendingPost = mapPendingPosts.get(postId);
+
+  if (!pendingPost || pendingPost.expiresAt <= Date.now()) {
+    return undefined;
+  }
+
+  pendingPost.crossPlatformState = { ...crossPlatformState };
+  return pendingPost;
 }

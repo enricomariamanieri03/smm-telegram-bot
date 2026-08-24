@@ -214,6 +214,9 @@ async function processPhotos(
       destination: socialPost.destinazione,
       fileIds,
       sourceMessageIds,
+      crossPlatformState: socialPost.destinazione === Destination.ENTRAMBI
+        ? { facebook: 'PENDING', instagram: 'PENDING', retryCount: 0 }
+        : undefined,
       previewMessageId: previewMessage.message_id,
     }, (expiredPost) => expirePreview(ctx, expiredPost.chatId, expiredPost.previewMessageId));
 
