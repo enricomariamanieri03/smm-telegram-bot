@@ -1,39 +1,60 @@
 import { Context } from 'grammy';
 import { deletePendingPost, getPendingPost } from '../services/pending-post.service.js';
 
+const REJECT_NOTIFICATION_LIFETIME_MS = 10_000;
+const REJECTED_POST_REMOVAL_DELAY_MS = 5_000;
+
+/** Elimina un'anteprima rifiutata e i media Telegram originali, mantenendo la chat pulita. */
 export async function handleRejectCallback(ctx: Context): Promise<void> {
-    try {
-        // 1. Notifica a Telegram la ricezione del click (rimuove lo stato di caricamento dal pulsante)
-        await ctx.answerCallbackQuery({ text: 'Post eliminato' });
+  try {
+    const postId = ctx.callbackQuery?.data?.match(/^rifiuta_(\d+)$/)?.[1];
+    const pendingPost = postId ? getPendingPost(postId) : undefined;
 
-        const postId = ctx.callbackQuery?.data?.match(/^rifiuta_(\d+)$/)?.[1];
-        const pendingPost = postId ? getPendingPost(postId) : undefined;
+    if (!postId || !pendingPost) {
+      await ctx.answerCallbackQuery({
+        text: 'Questa anteprima non è più disponibile.',
+        show_alert: true,
+      });
+      return;
+    }
 
-        if (!postId || !pendingPost) {
-            throw new Error(`L’anteprima da rifiutare non é più disponibile.`);
-        }
-        //Destrutturazione dell' oggetto prendendo i valori dei due corrispettivi campi
-        const { chatId, previewMessageId } = pendingPost;
-        deletePendingPost(postId);
+    // Chiude subito lo spinner del pulsante, mentre le cancellazioni proseguono in background.
+    await ctx.answerCallbackQuery({ text: 'Post eliminato' });
 
-        // 2. La cancellazione parte in background: non ritarda il messaggio di conferma.
-        void ctx.api.deleteMessage(chatId, previewMessageId).catch((error) => {
-            console.error('Errore durante l’eliminazione dell’anteprima:', error);
+    const { chatId, previewMessageId, sourceMessageIds } = pendingPost;
+    deletePendingPost(postId);
+
+    // Un album contiene più message_id: Set evita di richiedere due cancellazioni per lo stesso messaggio.
+    const messageIds = [...new Set([previewMessageId, ...sourceMessageIds])];
+    const cleanupTimer = setTimeout(() => {
+      void Promise.allSettled(
+        messageIds.map((messageId) => ctx.api.deleteMessage(chatId, messageId)),
+      ).then((results) => {
+        results.forEach((result, index) => {
+          if (result.status === 'rejected') {
+            console.error(`Errore durante l’eliminazione del messaggio Telegram ${messageIds[index]}:`, result.reason);
+          }
         });
+      });
+    }, REJECTED_POST_REMOVAL_DELAY_MS);
 
-        // 3. Invia il messaggio temporaneo di conferma
-        const rejectMsg = await ctx.reply(
-        '🗑️ *Post rifiutato e rimosso con successo.*\n\nSe vuoi riprovare, inviami pure una nuova foto!\nQuesto messaggio si auto-distruggerà tra 10 secondi...',
-        { parse_mode: 'Markdown' },
-        );
+    // Il timer non deve mantenere vivo il processo Node.js se il bot viene arrestato nel frattempo.
+    cleanupTimer.unref();
 
-        // 4. Timer 10s di autodistruzione del messaggio di conferma
-        setTimeout(() => {
-            void ctx.api.deleteMessage(chatId, rejectMsg.message_id).catch((error) => {
-                console.error('Errore durante la rimozione del messaggio temporaneo:', error);
-            });
-        }, 10000);
-    } catch (error) {
-        console.error('Errore durante la gestione del rifiuto del post:', error);
+    const rejectMessage = await ctx.reply(
+      '🗑️ *Post rifiutato.*\n\nL’anteprima e le foto verranno rimosse tra pochi secondi. Se vuoi riprovare, inviami pure una nuova foto!\nQuesto messaggio si auto-distruggerà tra 10 secondi...',
+      { parse_mode: 'Markdown' },
+    );
+
+    const deletionTimer = setTimeout(() => {
+      void ctx.api.deleteMessage(chatId, rejectMessage.message_id).catch((error) => {
+        console.error('Errore durante la rimozione del messaggio temporaneo:', error);
+      });
+    }, REJECT_NOTIFICATION_LIFETIME_MS);
+
+    // Anche questo timer è solo UX e non deve impedire la chiusura ordinata del processo.
+    deletionTimer.unref();
+  } catch (error) {
+    console.error('Errore durante la gestione del rifiuto del post:', error);
   }
 }
