@@ -1,22 +1,12 @@
-import { Context, InlineKeyboard } from 'grammy';
+import { Context } from 'grammy';
 import { generateSocialPost } from '../services/openai.service.js';
 import { savePendingPost } from '../services/pending-post.service.js';
+import { sendPostPreview } from '../services/preview.service.js';
 import { Destination } from '../types/destination.enum.js';
 import { AlbumBuffer } from '../types/album-buffer.interface.js';
 
 // Helper per la pausa di 3 secondi
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-// Helper per formattare la destinazione nell'anteprima
-function getDestinationLabel(destinazione: string): string {
-    if (destinazione === Destination.FB) {
-        return 'Facebook';
-    }
-    if (destinazione === Destination.IG) {
-        return 'Instagram';
-    }
-    return 'Instagram & Facebook';
-}
 
 /**
  * Alla scadenza conserva l'anteprima come riferimento, ma rimuove le azioni non piu valide
@@ -186,26 +176,12 @@ async function processPhotos(
 
     const postId = Date.now();
 
-    // Tastiera Inline affiancata
-    const keyboard = new InlineKeyboard()
-      .text('✅ Approva e Pubblica', `approva_${postId}`)
-      .text('✏️ Modifica Testo', `modifica_${postId}`)
-      .text('❌ Rifiuta', `rifiuta_${postId}`);
-
-    const destinationLabel = getDestinationLabel(socialPost.destinazione);
-    const locationText = socialPost.luogo ? `\n📍 ${socialPost.luogo}` : '';
-
-    // Anteprima del Post
-    const previewMessage = await ctx.reply(
-      `<b>📝 ANTEPRIMA DEL TUO POST</b>\n` +
-      `<i>📱 Destinazione: ${destinationLabel}</i>${locationText}\n\n` +
-      `<blockquote>${socialPost.testo_pulito}</blockquote>\n\n` +
-      `<b>👇 Cosa vuoi fare adesso?</b>`,
-      {
-        parse_mode: 'HTML',
-        reply_markup: keyboard,
-      }
-    );
+    const previewMessage = await sendPostPreview(ctx, {
+      caption: socialPost.testo_pulito,
+      destination: socialPost.destinazione,
+      location: socialPost.luogo,
+      postId: String(postId),
+    });
 
     // Salviamo tutte le anteprime in stato di attesa di Approva/Modifica/Rifiuta
     savePendingPost(String(postId), {
@@ -213,6 +189,7 @@ async function processPhotos(
       chatId: previewMessage.chat.id,
       destination: socialPost.destinazione,
       fileIds,
+      location: socialPost.luogo,
       sourceMessageIds,
       crossPlatformState: socialPost.destinazione === Destination.ENTRAMBI
         ? { facebook: 'PENDING', instagram: 'PENDING', retryCount: 0 }
