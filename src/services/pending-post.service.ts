@@ -13,14 +13,24 @@ export interface CrossPlatformPublicationState {
   instagramStatusMessageId?: number;
 }
 
+export type PendingPostEditingStatus = 'AWAITING_INPUT' | 'PROCESSING';
+
+/** Stato transitorio usato per associare il prossimo messaggio testuale alla sua anteprima (Caso: MODIFICA). */
+export interface PendingPostEditingState {
+  instructionsMessageId?: number;
+  status: PendingPostEditingStatus;
+}
+
 /** Dati minimi conservati tra la generazione dell'anteprima e il click di approvazione. */
 export interface PendingPost {
   caption: string;
   chatId: number;
   destination: Destination;
   fileIds: string[];
+  location: string;
   sourceMessageIds: number[];
   crossPlatformState?: CrossPlatformPublicationState;
+  editing?: PendingPostEditingState;
   expiresAt: number;
   previewMessageId: number;
 }
@@ -33,10 +43,17 @@ interface StoredPendingPost extends PendingPost {
 }
 
 /**
+ * Key: postId (callback Telegram); Value: stato completo dell'anteprima in attesa.
  * Store temporaneo in memoria delle anteprime. Non vengono conservati Blob o immagini base64,
  * che verrebbero invece riscaricati da Telegram solo quando l'utente approva la pubblicazione.
  */
 const mapPendingPosts = new Map<string, StoredPendingPost>();
+/**Key: chatId; Value: postId della sessione attualmente in modalità modifica.
+ * Permette all’handler message:text di risalire in O(1), dal chatId,
+ * al postId dell’unica anteprima che l’utente sta modificando.
+ * Non duplica il PendingPost, che continua a vivere esclusivamente in mapPendingPosts.
+ */ 
+const editingPostIdsByChat = new Map<number, string>();
 
 /** Esegue l'azione esterna associata alla scadenza senza lasciare rejection non gestite. */
 function runExpirationHandler(pendingPost: StoredPendingPost): void {
@@ -61,6 +78,7 @@ function expirePendingPost(postId: string, expiresAt: number): void {
   }
 
   mapPendingPosts.delete(postId);
+  editingPostIdsByChat.delete(pendingPost.chatId);
   runExpirationHandler(pendingPost);
 }
 
@@ -76,6 +94,7 @@ export function savePendingPost(
     fileIds: [...post.fileIds],
     sourceMessageIds: [...post.sourceMessageIds],
     crossPlatformState: post.crossPlatformState ? { ...post.crossPlatformState } : undefined,
+    editing: post.editing ? { ...post.editing } : undefined,
     expiresAt,
     onExpire,
   });
@@ -105,7 +124,88 @@ export function getPendingPost(postId: string): PendingPost | undefined {
 
 /** Rimuove lo stato quando l'utente approva o rifiuta l'anteprima. */
 export function deletePendingPost(postId: string): void {
+  const pendingPost = mapPendingPosts.get(postId);
   mapPendingPosts.delete(postId);
+
+  if (pendingPost) {
+    editingPostIdsByChat.delete(pendingPost.chatId);
+  }
+}
+
+/** Attiva la modalità modifica per un solo post alla volta nella stessa chat. */
+export function beginPendingPostEditing(postId: string): PendingPost | undefined {
+  const pendingPost = getPendingPost(postId);
+
+  if (!pendingPost || editingPostIdsByChat.has(pendingPost.chatId)) {
+    return undefined;
+  }
+
+  pendingPost.editing = { status: 'AWAITING_INPUT' };
+  editingPostIdsByChat.set(pendingPost.chatId, postId);
+  return pendingPost;
+}
+
+/** Salva l'ID del messaggio istruzioni, necessario per rimuoverlo quando arriva la modifica. */
+export function setPendingPostEditingInstructionsMessageId(postId: string, messageId: number): void {
+  const pendingPost = mapPendingPosts.get(postId);
+
+  if (pendingPost?.editing) {
+    pendingPost.editing.instructionsMessageId = messageId;
+  }
+}
+
+/** Restituisce il post in attesa di testo per una chat, ignorando richieste duplicate durante il processing. */
+export function getPendingPostAwaitingEditInput(chatId: number): { postId: string; pendingPost: PendingPost } | undefined {
+  const postId = editingPostIdsByChat.get(chatId);
+  const pendingPost = postId ? getPendingPost(postId) : undefined;
+
+  if (!postId || !pendingPost || pendingPost.editing?.status !== 'AWAITING_INPUT') {
+    return undefined;
+  }
+
+  return { postId, pendingPost };
+}
+
+/** Blocca messaggi testuali ulteriori mentre OpenAI rigenera l'anteprima. */
+export function markPendingPostEditAsProcessing(postId: string): PendingPost | undefined {
+  const pendingPost = mapPendingPosts.get(postId);
+
+  if (!pendingPost?.editing) {
+    return undefined;
+  }
+
+  pendingPost.editing.status = 'PROCESSING';
+  return pendingPost;
+}
+
+/** Annulla una modifica non avviata o non completata e libera la chat per un nuovo tentativo. */
+export function clearPendingPostEditing(postId: string): void {
+  const pendingPost = mapPendingPosts.get(postId);
+
+  if (pendingPost) {
+    pendingPost.editing = undefined;
+    editingPostIdsByChat.delete(pendingPost.chatId);
+  }
+}
+
+/** Aggiorna l'anteprima dopo una modifica e chiude la relativa sessione testuale. */
+export function updatePendingPostPreview(
+  postId: string,
+  updates: Pick<PendingPost, 'caption' | 'location' | 'previewMessageId'>,
+): PendingPost | undefined {
+  const pendingPost = getPendingPost(postId);
+
+  if (!pendingPost) {
+    return undefined;
+  }
+
+  pendingPost.caption = updates.caption;
+  pendingPost.location = updates.location;
+  pendingPost.previewMessageId = updates.previewMessageId;
+  pendingPost.editing = undefined;
+  editingPostIdsByChat.delete(pendingPost.chatId);
+
+  return pendingPost;
 }
 
 /** Aggiorna in modo atomico lo stato della pubblicazione congiunta mantenendo la sessione esistente. */

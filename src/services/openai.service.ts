@@ -52,6 +52,35 @@ const SOCIAL_POST_SCHEMA = {
   required: ['destinazione', 'luogo', 'testo_pulito'],
 };
 
+const EDITED_SOCIAL_POST_INSTRUCTIONS = `
+Sei il Copywriter per Giuseppe Manieri Autoservizi.
+
+Applica le modifiche richieste dall'utente al testo del post precedente.
+
+REGOLE TASSATIVE:
+1. Mantieni uno stile umano, fresco e professionale, le emoji e gli hashtag ufficiali: #Autoservizi #NoleggioBus #NCC #ViaggiDiGruppo #GiuseppeManieriAutoservizi.
+2. Non inserire il pin 📍 e non inserire una riga "Luogo:" all'inizio della didascalia.
+3. Il campo "luogo" può contenere esclusivamente una città o destinazione del viaggio menzionata esplicitamente dall'utente. Non usare sede aziendale, hashtag o località dedotte.
+4. Se non esiste una città/destinazione esplicita, restituisci "luogo": "".
+5. Mantieni esattamente eventuali tag e menzioni @ presenti nel testo.
+
+Restituisci esclusivamente il JSON conforme allo schema richiesto.`;
+
+const EDITED_SOCIAL_POST_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    luogo: { type: 'string' },
+    testo_pulito: { type: 'string' },
+  },
+  required: ['luogo', 'testo_pulito'],
+};
+
+export interface EditedSocialPost {
+  luogo: string;
+  testo_pulito: string;
+}
+
 export async function generateSocialPost(userCaption: string, imageDataUrls: string[]): Promise<SocialPost> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error('OPENAI_API_KEY mancante');
@@ -104,4 +133,47 @@ export async function generateSocialPost(userCaption: string, imageDataUrls: str
   if (!content) throw new Error('Nessuna risposta da OpenAI');
 
   return JSON.parse(content) as SocialPost;
+}
+
+/** Rigenera una caption a partire dal testo precedente e dalle correzioni ricevute su Telegram. */
+export async function generateEditedSocialPost(
+  originalCaption: string,
+  userInstructions: string,
+): Promise<EditedSocialPost> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) throw new Error('OPENAI_API_KEY mancante');
+
+  const openai = new OpenAI({ apiKey });
+  const response = await openai.chat.completions.create({
+    model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+    messages: [
+      { role: 'system', content: EDITED_SOCIAL_POST_INSTRUCTIONS },
+      {
+        role: 'user',
+        content:
+          `Testo del post precedente:\n${originalCaption}\n\n` +
+          `Modifiche richieste dall'utente:\n${userInstructions}`,
+      },
+    ],
+    response_format: {
+      type: 'json_schema',
+      json_schema: {
+        name: 'edited_social_post',
+        strict: true,
+        schema: EDITED_SOCIAL_POST_SCHEMA,
+      },
+    },
+  });
+
+  const message = response.choices[0]?.message;
+
+  if (message?.refusal) {
+    throw new Error(`OpenAI ha rifiutato la richiesta: ${message.refusal}`);
+  }
+
+  if (!message?.content) {
+    throw new Error('Nessuna risposta da OpenAI');
+  }
+
+  return JSON.parse(message.content) as EditedSocialPost;
 }

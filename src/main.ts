@@ -2,6 +2,8 @@ import { Bot, Context, NextFunction } from 'grammy';
 import dotenv from 'dotenv';
 import {
   handleApproveCallback,
+  handleEditTextMessage,
+  handleModifyCallback,
   handleRejectCallback,
   handleStartAndHelpCommand,
   handlePhotoMessage,
@@ -59,6 +61,8 @@ bot.callbackQuery(/^rifiuta_\d+$/, handleRejectCallback);
 // Gestione dei pulsanti "Approva e Pubblica" e "Riprova" delle anteprime.
 bot.callbackQuery(/^approva_\d+$/, handleApproveCallback);
 bot.callbackQuery(/^riprova_\d+$/, handleApproveCallback);
+bot.callbackQuery(/^modifica_\d+$/, handleModifyCallback);
+bot.on('message:text', handleEditTextMessage);
 
 // Avvio applicazione
 async function startApplication() {
