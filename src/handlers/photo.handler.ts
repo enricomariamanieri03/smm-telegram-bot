@@ -183,7 +183,9 @@ async function processPhotos(
       postId: String(postId),
     });
 
-    // Salviamo tutte le anteprime in stato di attesa di Approva/Modifica/Rifiuta
+    // Salviamo l'anteprima in attesa di Approva/Modifica/Rifiuta.
+    // La callback finale adatta la firma di onExpire: riceve il PendingPost
+    // scaduto e passa a expirePreview i suoi chatId e previewMessageId.
     savePendingPost(String(postId), {
       caption: socialPost.testo_pulito,
       chatId: previewMessage.chat.id,

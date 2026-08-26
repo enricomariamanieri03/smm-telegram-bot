@@ -237,6 +237,7 @@ export class FacebookService {
    * Carica una singola foto sulle Graph API di Facebook.
    * Gestisce sia la pubblicazione immediata che l'upload "silenzioso" in bozza (published = false)
    * necessario come primo step per la creazione dei post multi-foto.
+   * Nell'upload "silenzioso" viene caricato il file sulla pagina Facebook senza essere reso publico (bozza)
    */
   private async uploadPhoto(
     config: FacebookConfig,
@@ -279,6 +280,7 @@ export class FacebookService {
   }
   /**
    * Esegue una richiesta POST multipart e centralizza parsing, errori Graph API e validazione della risposta.
+   * Ritorna in caso di successo un oggetto contente id (l'id della foto caricata), post_id.
    */
   private async postFormData(endpoint: string, formData: FormData): Promise<FacebookPublishResponse> {
     const response = await this.fetchWithTimeout(endpoint, {
