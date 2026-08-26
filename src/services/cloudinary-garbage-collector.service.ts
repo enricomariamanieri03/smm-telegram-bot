@@ -37,13 +37,18 @@ export class CloudinaryGarbageCollectorService {
     this.timer.unref();
   }
 
-  /** Un errore di cleanup viene loggato, senza mai interrompere il bot Telegram. */
-  private async runOnce(): Promise<void> {
+  /**
+   * Esegue una singola pulizia e restituisce il numero di asset rimossi.
+   * Un errore viene solo loggato: il garbage collector non deve mai interrompere il bot Telegram.
+   */
+  async runOnce(): Promise<number> {
     try {
       const deletedCount = await this.deleteExpiredInstagramImages();
       console.info(`Garbage collector Cloudinary completato: ${deletedCount} asset temporanei rimossi.`);
+      return deletedCount;
     } catch (error) {
       console.error('Garbage collector Cloudinary non completato:', error);
+      return 0;
     }
   }
 

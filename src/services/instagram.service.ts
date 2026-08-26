@@ -357,23 +357,48 @@ export class InstagramService {
     throw new Error('Instagram non ha preparato il media container entro il tempo previsto.');
   }
 
+  /**
+   * Legge lo stato asincrono di un media container creato in precedenza.
+   *
+   * La creazione di `/media` restituisce subito un ID, ma Meta continua in background
+   * a scaricare l'immagine dall'URL Cloudinary e a validarla. Questa GET interroga 
+   * lo stato di download e validazione degli asset tramite il container ID.
+   *
+   * È importante non confondere i due livelli di stato restituiti da Meta:
+   * - un HTTP 200 significa soltanto che la richiesta di polling è valida e il container
+   *   è stato trovato;
+   * - `status_code` nel body (`IN_PROGRESS`, `FINISHED`, `ERROR`, `EXPIRED`, ...) descrive
+   *   invece l'esito del processing asincrono del media.
+   *
+   * Per esempio, `{ status_code: 'ERROR' }` con HTTP 200 non è un errore della GET:
+   * è Meta che comunica che il container esiste ma non ha potuto processare l'asset.
+   * `waitForContainer` interpreta poi questo stato e decide se proseguire il polling,
+   * pubblicare o terminare il flusso con cleanup sicuro.
+   */
   private async getContainerStatus(
     config: InstagramConfig,
     containerId: string,
   ): Promise<InstagramContainerStatusResponse> {
     // Il polling è una GET separata dai POST di creazione: il token va quindi aggiunto esplicitamente anche qui.
     const endpoint = new URL(this.createEndpoint(config, containerId));
+    // Chiediamo esclusivamente lo stato tecnico e la descrizione leggibile del processing.
     endpoint.searchParams.set('fields', 'status_code,status');
     endpoint.searchParams.set('access_token', config.accessToken);
 
+    // Timeout e problemi di rete vengono trasformati in errori applicativi leggibili.
     const response = await this.fetchWithTimeout(endpoint.toString());
+    // Anche una risposta HTTP non riuscita può contenere dettagli Meta utili nel body JSON.
     const data = await parseInstagramResponse(response);
     const apiError = getInstagramGraphApiError(data);
 
+    // Questo ramo riguarda un errore della chiamata Graph API, non lo stato interno del container.
+    // Per 4xx il cleanup è sicuro; per 5xx l'esito remoto può restare ambiguo.
     if (apiError || !response.ok) {
       throw createInstagramApiError(response.status, apiError);
     }
 
+    // La GET ha avuto successo: restituiamo ora il status_code applicativo che waitForContainer
+    // userà per attendere, pubblicare oppure interrompere il flusso.
     return getContainerStatus(data);
   }
 
