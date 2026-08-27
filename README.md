@@ -33,6 +33,20 @@ Telegram preview ◄────────────────────
 
 See [the architecture guide](docs/ARCHITECTURE.md) for the full workflow, state model, error handling, and testing strategy.
 
+## Demo
+
+<p align="center">
+  <a href="https://drive.google.com/file/d/1ppqGexO6NCCmsfqi3913LNdhvlcewA6p/view?usp=drive_link">
+    <img
+      src="docs/assets/telegram-demo-preview.png"
+      alt="Telegram workflow showing an AI-generated social-post preview and its actions"
+      width="360"
+    />
+  </a>
+</p>
+
+<p align="center"><em>Click the preview to watch the complete Telegram workflow demo.</em></p>
+
 ## Tech stack
 
 - **Runtime:** Node.js, TypeScript, native ESM
